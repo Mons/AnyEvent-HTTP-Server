@@ -21,7 +21,7 @@ sub new {
 	my %args = @_;
 	my $srv = $args{server};
 	my $fh  = $args{fh};
-	my $h = AnyEvent::Handle->new(
+	my $h = AnyEvent::Handle::Writer->new(
 		fh         => $fh,
 		on_eof     => sub { $this or return; $this->error("EOF from client") },
 		on_error   => sub { $this or return; $this->error("$!") },
@@ -31,7 +31,7 @@ sub new {
 	$self->{fh} = $fh;
 	$self->{h}  = $h;
 	$self->{r}  = [],
-	$self->{ka_timeout} = $srv->{keep_alive_timeout} || 300;
+	$self->{ka_timeout} = $srv->{keep_alive_timeout} || 30;
 	if ($srv->{keep_alive}) {
 		$self->{touch} = AE::now;
 		$self->ka_timer;
@@ -47,6 +47,7 @@ sub ka_timer {
 	weaken (my $this = $self);
 	$self->{ka} = AE::timer $this->{ka_timeout} + 1, 0, sub {
 		$this or return;
+		warn "KA timed out";
 		if (AE::now - $this->{touch} >= $this->{ka_timeout}) {
 			$this->close;
 		} else {
@@ -70,10 +71,8 @@ sub read_header {
 				my $line = shift;
 				my $xml = $pre.$line;
 				warn "XML Request $xml";
-				return;
-=for rem
-				if ($xml =~ m{^\s*<policy-file-request\s*/>\s*$} and $self->{policy_request}) {
-					$self->{policy_request}->(sub {
+				if ($xml =~ m{^\s*<policy-file-request\s*/>\s*$} and $con->{srv}{policy_request}) {
+					$con->{srv}{policy_request}->(sub {
 						my $res;
 						if (@_ == 1 and !ref $_[0]) {
 							$res = shift;
@@ -100,21 +99,20 @@ sub read_header {
 						$con->{h}->push_write($res."\0");
 					});
 				}
-				elsif ($self->{xml_request}) {
-					$self->{xml_request}->($xml,$con);
+				elsif ($con->{srv}{xml_request}) {
+					$con->{srv}{xml_request}->($xml,$con);
 					return;
 				}
 				else {
-					warn "Got XML $pre$line";
+					warn "Not handled XML $pre$line";
 				}
-=cut
 				$con->destroy();
 			});
 		} else {
 			$con->{h}->unshift_read(line => sub {
 				$con or return;shift;
 				my $line = $pre.shift;
-				warn "$con->{id}: $line";
+				#warn "$con->{id}: $line";
 				if ($line =~ /(\S+) \040 (\S+) \040 HTTP\/(\d+\.\d+)/xso) {
 					my ($meth, $url, $hv) = ($1, $2, $3);
 					$con->{method} = $meth;
@@ -217,6 +215,7 @@ sub response {
 	$hdr->{'content-type'} ||= 'text/html';
 	if (ref $content eq 'HASH') {
 		if ($content->{sendfile}) {
+			$content->{size} = 
 			$hdr->{'content-length'} = -s $content->{sendfile};
 		}
 	}
@@ -224,15 +223,28 @@ sub response {
 	#                         = _time_to_http_date time;
 	#$hdr->{'cache-control'}  = "max-age=0";
 	$hdr->{connection} ||= $con->{type};
+	if ($code >= 400 and !length $content ) {
+		$content = <<EOC;
+<html>
+<head><title>$code $msg</title></head>
+<body bgcolor="white">
+<center><h1>$code $msg</h1></center>
+<hr><center>AnyEvent::HTTP::Server/$AnyEvent::HTTP::Server::VERSION</center>
+</body>
+</html>
+EOC
+	}
 
 	$hdr->{'content-length'} = length $content
-		if not (defined $hdr->{'content-length'}) && not ref $content;
+		if not (defined $hdr->{'content-length'})
+		and not ref $content
+		and $code !~ /^(?:1\d\d|[23]04)$/;
 
-	unless (defined $hdr->{'content-length'}) {
+	#unless (defined $hdr->{'content-length'}) {
 		# keep alive with no content length will NOT work.
 		# TODO: chunked
 		# delete $self->{keep_alive};
-	}
+	#}
 	for (@HEADER_ORDER) {
 		if (my $v = delete $hdr->{$_}) {
 			$res .= "$HEADER_NAME{$_}: $v\015\012";
@@ -245,7 +257,7 @@ sub response {
 
 	$res .= "\015\012";
 	$con->{h}->push_write($res);
-	#warn "Respond to $id:\n$res";
+	warn "Respond to $con->{id}:\n$res";
 
 =for rem
 	if (ref ($content) eq 'CODE') {
@@ -289,14 +301,13 @@ sub response {
 =cut
 		$res .= $content unless ref $content;
 		warn "Send response $code on $r->{method} $r->{uri}";
-		$con->{h}->push_write($res);
 		if (ref $content eq 'HASH') {
 			if ($content->{sendfile}) {
-				my $file = $content->{sendfile};
-				open my $f, '<', $content->{sendfile};
-				sendfile $con->{fh}, $f, 0 or warn "sendfile: $!";
-				close $f;
+				warn "sendfile $content->{sendfile}, $content->{size}";
+				$con->{h}->push_sendfile($content->{sendfile}, $content->{size});
 			}
+		} else {
+			$con->{h}->push_write($content);
 		}
 	#}
 	if ($con->{close}) {
@@ -333,7 +344,7 @@ sub destroy {
 
 sub DESTROY {
 	my $self = shift;
-	warn "(".int($self).") Destroying AE::HTTP::Srv::Cnn" if $self->{debug};
+	warn "(".int($self).") Destroying AE::HTTP::Srv::Cnn";# if $self->{debug};
 	$self->{h}->destroy();
 	# TODO: cleanup callbacks
 	%$self = ();

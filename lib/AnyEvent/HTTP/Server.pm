@@ -75,9 +75,9 @@ sub accept :method {
 
 sub handle_request {
 	my ($self,$r,$data) = @_;
-	warn "Handle request";
+	#warn "Handle request";
 	weaken(my $x = $r);
-	$r->{t} = AE::timer 2,0,sub {
+	$r->{t} = AE::timer 5,0,sub {
 		$x or return;
 		warn "Fire timeout timer";
 		$x->response(504, msg => "Gateway timeout");

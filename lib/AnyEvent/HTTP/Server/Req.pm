@@ -2,10 +2,13 @@ package AnyEvent::HTTP::Server::Req;
 
 use common::sense;
 use HTTP::Easy::Status;
+use HTTP::Easy::Headers;
+use URI;
 
 sub new {
 	my $pk = shift;
 	my $self = bless {@_},$pk;
+	$self->{uri} = URI->new($self->{uri});
 	$self;
 }
 
@@ -18,7 +21,7 @@ sub upgrade {
 	my $self = shift;
 	my $cb = pop;
 	my $type = shift;
-	my $headers = shift || {};
+	my $headers = shift || HTTP::Easy::Headers->new({});
 	if (lc $type eq 'websocket') {
 		$headers->{upgrade} = 'WebSocket';
 		$headers->{connection} = 'Upgrade';
@@ -29,8 +32,10 @@ sub upgrade {
 			$loc =~ s{^http}{ws};
 			$loc;
 		};
-		$self->{server}->response($self,101,"Web Socket Protocol Handshake",$headers);
-		my $ws = AE::HTTPD::WebSocket->new(
+		# Dont use response method here to avoid cleanup
+		$self->{con}->response($self,101,'',msg => "Web Socket Protocol Handshake", headers => $headers);
+		#warn "$self have\n\t con=$self->{con}\n\tsrv=$self->{con}{srv}\n\tws=$self->{con}{srv}{websocket_class}\n";
+		my $ws = $self->{con}{srv}{websocket_class}->new(
 			con => $self->{con},
 		);
 		$self->dispose;
@@ -66,7 +71,7 @@ sub DESTROY {
 	my $self = shift;
 	warn "DESTROY request";
 	$self->{con} or return %$self = ();
-	$self->{con}->response($self, 500, msg => "No response");
+	$self->{con}->response($self, 404, '', msg => "Request not handled");
 }
 
 

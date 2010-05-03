@@ -10,6 +10,7 @@ build_requires 'Test::More';
 requires 'AnyEvent', 5;
 requires 'AnyEvent::Handle::Writer';
 requires 'HTTP::Easy';
+requires 'Sys::Sendfile'; #for writer to work
 
 auto_install;
 
