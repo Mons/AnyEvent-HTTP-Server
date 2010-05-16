@@ -38,23 +38,42 @@ sub new {
 		@_,
 		con => {},
 	},$pk;
-	$self->{host} //= '0.0.0.0';
-	$self->{port} //= 8080;
+	if ($self->{socket}) {
+		
+	} else {
+		$self->{host} //= '0.0.0.0';
+		$self->{port} //= 8080;
+	}
 	return $self;
 }
 
 sub start {
 	my $self = shift;
 	warn "Starting server on port $self->{port}\n";
-	tcp_server $self->{host}, $self->{port}, sub {
-		my $fh = shift or return warn "couldn't accept client: $!";
-		my ($host, $port) = @_;
-		$self->accept($fh,$host, $port);
-	}, sub {
-		#my $fh = shift or return warn "couldn't accept client: $!";
-		#setsockopt($fh, SOL_SOCKET, SO_REUSEADDR, 1) or die "Can't set socket option: $!";
-		1024;
-	};
+	package AnyEvent::Socket;
+	if ($self->{socket}) {
+		# <Derived from AnyEvent::Socket>
+		$self->{aw} = AE::io $self->{socket}, 0, sub {
+			while ($self->{socket} && (my $peer = accept my $fh, $self->{socket})) {
+				binmode($fh,':raw');
+				AnyEvent::Util::fh_nonblocking $fh, 1;
+				select((select($fh),$| = 1)[0]);
+				my ($service, $host) = AnyEvent::Socket::unpack_sockaddr($peer);
+				$self->accept($fh, AnyEvent::Socket::format_address($host), $service);
+			}
+		};
+		# </Derived from AnyEvent::Socket>
+	} else {
+		tcp_server $self->{host}, $self->{port}, sub {
+			my $fh = shift or return warn "couldn't accept client: $!";
+			my ($host, $port) = @_;
+			$self->accept($fh,$host, $port);
+		}, sub {
+			#my $fh = shift or return warn "couldn't accept client: $!";
+			#setsockopt($fh, SOL_SOCKET, SO_REUSEADDR, 1) or die "Can't set socket option: $!";
+			1024;
+		};
+	}
 	warn "Ready";
 }
 
@@ -63,6 +82,8 @@ sub accept :method {
 	my $con = $self->{connection_class}->new(
 		server   => $self,
 		fh       => $fh,
+		host     => $host,
+		port     => $port,
 		on_error => sub {
 			my $con = shift;
 			warn "@_";

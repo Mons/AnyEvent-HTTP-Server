@@ -18,7 +18,6 @@ sub new {
 }
 
 sub onmessage {
-	warn "@_";
 	my $self = shift;
 	if (@_) {
 		$self->{recv} = shift;
@@ -30,11 +29,20 @@ sub onmessage {
 	$self->{recv};
 }
 
+sub log:method {
+	my $self = shift;
+	$self->{con} or return;
+	$self->{con}->log(@_);
+}
+
 sub send : method {
 	my $self = shift;
+	#$self->{con} or return;
 	my $data = shift;
+	my $bytes = $UTF->encode($UTF->decode($data));
+	$self->log("[ws.send:text] %d bytes", length $bytes);
 	$self->{con}{h}->push_write(
-		"\x00".$UTF->encode($UTF->decode($data))."\xff"
+		"\x00".$bytes."\xff"
 	);
 }
 
@@ -57,6 +65,7 @@ sub reader {
 		my $first = shift;
 		my $byte = ord($first);
 		if ($first & 0x80 == 0x80) {
+			#$self->log("Need binary frame");
 			$h->unshift_read(regex => qr{^[\x80-\xff]+[\x00-\x7f]}, sub {
 				use integer;
 				shift;
@@ -66,10 +75,9 @@ sub reader {
 					my $byte = shift(@bytes) & 0x7f;
 					$length = $length * 128 + $byte;
 				}
-				warn "Got length $length";
 				$h->unshift_read(chunk => $length, sub {
 					shift;
-					warn "recv binary frame";
+					$self->log("[ws.recv:binary] %d bytes", length $_[0]);
 					$self->{recv}($_[0]);
 					$self->reader;
 				});
@@ -77,11 +85,14 @@ sub reader {
 		}
 		else {
 			# Text frame
+			#$self->log("Need text frame");
 			$self->{con}{h}->unshift_read(line => qr{\x{ff}}, sub {
 				shift;
-				my $val = shift;#substr($val,-1,1) = '';
-				warn "recv text: $val";
-				$self->{recv}($val);
+				my $val = shift;
+				#utf8::encode($val) if utf8::is_utf8($val);
+				my $utf = $UTF->decode($val);
+				$self->log("[ws.recv:text] %d bytes", length $val);
+				$self->{recv}($utf);
 				$self->reader;
 			});
 		}

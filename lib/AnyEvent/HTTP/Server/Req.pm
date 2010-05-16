@@ -69,7 +69,6 @@ sub dispose {
 
 sub DESTROY {
 	my $self = shift;
-	warn "DESTROY request";
 	$self->{con} or return %$self = ();
 	$self->{con}->response($self, 404, '', msg => "Request not handled");
 }

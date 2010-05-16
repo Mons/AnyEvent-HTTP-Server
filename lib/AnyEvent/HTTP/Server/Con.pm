@@ -15,6 +15,18 @@ use Scalar::Util qw(weaken);
 use HTTP::Easy::Headers;
 use HTTP::Easy::Status;
 
+sub log:method {
+	my $self = shift;
+	my $fmt = shift;
+	$fmt =~ s{\n+$}{};
+	warn
+		sprintf
+		#"[@{[ ~~localtime ]}] - ".
+		"$self->{id} | %-15s - $fmt\n",$self->{host}, @_;
+}
+
+
+
 sub new {
 	my $self = bless {}, shift;
 	weaken (my $this = $self);
@@ -22,6 +34,7 @@ sub new {
 	my $srv = $args{server};
 	my $fh  = $args{fh};
 	my $h = AnyEvent::Handle::Writer->new(
+	#my $h = AnyEvent::Handle->new(
 		fh         => $fh,
 		on_eof     => sub { $this or return; $this->error("EOF from client") },
 		on_error   => sub { $this or return; $this->error("$!") },
@@ -31,6 +44,8 @@ sub new {
 	$self->{fh} = $fh;
 	$self->{h}  = $h;
 	$self->{r}  = [],
+	$self->{host} = $args{host};
+	$self->{port} = $args{port};
 	$self->{ka_timeout} = $srv->{keep_alive_timeout} || 30;
 	if ($srv->{keep_alive}) {
 		$self->{touch} = AE::now;
@@ -47,7 +62,7 @@ sub ka_timer {
 	weaken (my $this = $self);
 	$self->{ka} = AE::timer $this->{ka_timeout} + 1, 0, sub {
 		$this or return;
-		warn "KA timed out";
+		warn "closing by timeout keep-alive connection from $this->{host}:$this->{port}\n";
 		if (AE::now - $this->{touch} >= $this->{ka_timeout}) {
 			$this->close;
 		} else {
@@ -64,7 +79,6 @@ sub read_header {
 	$con->{h}->push_read(chunk => 3 => sub {
 		$con or return;shift;
 		my $pre = shift;
-		warn "Got pre-chunk $pre";
 		if ($pre =~ m{^<}) {
 			$con->{h}->unshift_read(regex => qr{.+?>} => sub {
 				$con or return;shift;
@@ -257,7 +271,8 @@ EOC
 
 	$res .= "\015\012";
 	$con->{h}->push_write($res);
-	warn "Respond to $con->{id}:\n$res";
+	$con->log("%s - %s",$code,$r->{uri});
+	#warn "Respond to $con->{id}:\n$res";
 
 =for rem
 	if (ref ($content) eq 'CODE') {
@@ -300,14 +315,13 @@ EOC
 	else {
 =cut
 		$res .= $content unless ref $content;
-		warn "Send response $code on $r->{method} $r->{uri}";
+		#warn "Send response $code on $r->{method} $r->{uri}";
 		if (ref $content eq 'HASH') {
 			if ($content->{sendfile}) {
-				warn "sendfile $content->{sendfile}, $content->{size}";
 				$con->{h}->push_sendfile($content->{sendfile}, $content->{size});
 			}
 		} else {
-			$con->{h}->push_write($content);
+			$con->{h}->push_write($content) if length $content;
 		}
 	#}
 	if ($con->{close}) {
@@ -344,7 +358,7 @@ sub destroy {
 
 sub DESTROY {
 	my $self = shift;
-	warn "(".int($self).") Destroying AE::HTTP::Srv::Cnn";# if $self->{debug};
+	#warn "(".int($self).") Destroying AE::HTTP::Srv::Cnn";# if $self->{debug};
 	$self->{h}->destroy();
 	# TODO: cleanup callbacks
 	%$self = ();

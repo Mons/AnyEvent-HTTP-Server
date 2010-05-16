@@ -20,14 +20,14 @@ my $server = AnyEvent::HTTP::Server->new(
 				my $r = shift;
 				my $rpath = $r->{uri}->path;
 					if ($r->wants_websocket) {
-						warn "Request $r->{uri} wants websocket upgrade!";
+						#warn "Request $r->{uri} wants websocket upgrade!";
 						if ($rpath =~ m{^/ws/?}) {
 							$r->upgrade('websocket', sub {
 								if (my $ws = shift) {
 									$ws->onmessage(sub {
-										warn "Got message: @_";
 										$ws->send("re: @_");
 									});
+									$ws->send("Hello!");
 								} else {
 									warn "Upgrade failed: @_";
 								}
@@ -60,7 +60,7 @@ my $server = AnyEvent::HTTP::Server->new(
 		warn "Handle policy request\n";
 		shift->(
 			'site-control' => { 'permitted-cross-domain-policies' => 'master-only' },
-			'allow-access-from' => { 'domain' => "*.xfo.cc", 'to-ports' => "80" },
+			'allow-access-from' => { 'domain' => "*", 'to-ports' => "80" },
 		);
 	},
 	1 => sub {
