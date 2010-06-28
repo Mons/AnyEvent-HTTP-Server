@@ -1,0 +1,118 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<!--
+  Copyright: Hiroshi Ichikawa <http://gimite.net/en/>
+  License: New BSD License
+-->
+
+<html><head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+	<title>SnyEvent::HTTP::Server + WebSockets Sample</title>
+	<style type="text/css">
+		body {
+			background: white;
+			background-position: top left;
+			background-attachment: fixed;
+			background-repeat: no-repeat;
+			/* background-image: url(/bg.png); */
+			padding-left: 64px;
+		}
+		table.tests {
+			background: #ff8000;
+			color: white;
+			width: 100%;
+		}
+		.tests {
+			background: #ff8000;
+			color: white;
+			width: 100%;
+		}
+		.tests .block {
+			float:left;
+			border-left:dotted white 1px;
+			padding:0.5em 1.5em;
+		}
+		.tests .t { font-weight:bold; }
+		.tests address {
+			border: dotted white 3px;
+			background: white;
+			color: black;
+		}
+	</style>
+
+  <!-- Include these three JS files: -->
+  <script type="text/javascript" src="swfobject.js"></script>
+  <script type="text/javascript" src="FABridge.js"></script>
+  <script type="text/javascript" src="web_socket.js"></script>
+
+  <script type="text/javascript">
+    
+    // Set URL of your WebSocketMain.swf here:
+    WebSocket.__swfLocation = "WebSocketMain.swf";
+
+    var ws;
+    var manual_close;
+    
+    function init() {
+
+      // Connect to Web Socket.
+      // Change host/port here to your own Web Socket server.
+      ws = new WebSocket("ws://websox.org/ws");
+
+      // Set event handlers.
+      ws.onopen = function() {
+        output("connected");
+      };
+      ws.onmessage = function(e) {
+        // e.data contains received string.
+        output("<< " + e.data);
+      };
+      ws.onclose = function() {
+        output("disconnect");
+        if (manual_close) return;
+        setTimeout(function () {
+            output("try to reconnect");
+            init();
+        },300);
+      };
+
+    }
+    
+    function onSubmit() {
+      var input = document.getElementById("input");
+      // You can send message to the Web Socket using ws.send.
+      ws.send(input.value);
+      output(">> " + input.value);
+      input.value = "";
+      input.focus();
+    }
+    
+    function onCloseClick() {
+      //console.log("onCloseClick");
+      manual_close = true;
+      ws.close();
+    }
+
+    function onOpenClick() {
+      manual_close = false;
+      init();
+    }
+    
+    function output(str) {
+      var log = document.getElementById("log");
+      var escaped = str.replace(/&/, "&amp;").replace(/</, "&lt;").
+        replace(/>/, "&gt;").replace(/"/, "&quot;"); // "
+      log.innerHTML = escaped + "<br>" + log.innerHTML;
+    }
+
+  </script>
+</head><body onload="init();">
+  <button onclick="onOpenClick(); return false;">open</button>
+  <form onsubmit="onSubmit(); return false;" style="display:inline">
+    <input type="text" id="input">
+    <input type="submit" value="Send">
+  </form>
+  <button onclick="onCloseClick(); return false;">close</button>
+  <button onclick="log.innerHTML = ''; return false;">clear</button>
+  <div id="log"></div>
+</body></html>

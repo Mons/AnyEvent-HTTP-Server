@@ -1,6 +1,7 @@
 package AnyEvent::HTTP::Server::Action::Static;
 
-use uni::perl ':dumper';
+use uni::perl;
+use URI;
 use File::MimeInfo;
 
 sub new {
@@ -21,7 +22,7 @@ sub new {
 			my $headers = HTTP::Easy::Headers->new({});
 			if (-f _) {
 				my $type = mimetype($path);
-				#warn "Defined type $type for $path";
+				#warn "Defined type $type for $path, size=". -s _;
 				$headers->{'content-type'} = $type;
 				$headers->{'content-length'} = -s _;
 				$headers->{'cache-control'} => 'no-cache, must-revalidate, max-age=0';
@@ -32,6 +33,7 @@ sub new {
 				}
 				return 1;
 			} else {
+				warn "File `$path' not found";
 				return 0;
 			}
 		}

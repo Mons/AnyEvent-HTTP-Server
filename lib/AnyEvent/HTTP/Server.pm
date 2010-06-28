@@ -49,9 +49,8 @@ sub new {
 
 sub start {
 	my $self = shift;
-	warn "Starting server on port $self->{port}\n";
-	package AnyEvent::Socket;
 	if ($self->{socket}) {
+		warn "Starting server on socket\n";
 		# <Derived from AnyEvent::Socket>
 		$self->{aw} = AE::io $self->{socket}, 0, sub {
 			while ($self->{socket} && (my $peer = accept my $fh, $self->{socket})) {
@@ -64,6 +63,7 @@ sub start {
 		};
 		# </Derived from AnyEvent::Socket>
 	} else {
+		warn "Starting server on port $self->{port}\n";
 		tcp_server $self->{host}, $self->{port}, sub {
 			my $fh = shift or return warn "couldn't accept client: $!";
 			my ($host, $port) = @_;
