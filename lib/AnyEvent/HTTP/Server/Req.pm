@@ -29,22 +29,20 @@ sub upgrade {
 			$self->{con}{h}->push_read(chunk => 8, sub {
 				shift;
 				my $key3 = shift;
-				my @keys = @{ $self->{headers} }{qw( sec-websocket-key1 sec-websocket-key2)};
-				for my $key (@keys) {
+				my @keys;
+				for (qw( sec-websocket-key1 sec-websocket-key2)) {
+					my $key = $self->{headers}{$_};
 					my $sp = $key =~ s/ //g;
+					if ($sp == 0) { warn "Key $_ have no spaces"; return $self->error(400); $cb->undef("Bad $_"); }
 					$key =~ s/\D+//g;
 					warn "key extract = $key / $sp";
 					$key = int ($key / $sp);
 					$key = pack N => $key;
-					warn sprintf "%08b", $key;
-					warn "Got key<$key/$sp>";
+					push @keys, $key;
 				}
-				warn "keys = [@keys]";
 				my $data = join '', @keys, $key3;
-				warn "Have data=<$data>";
 				use Digest::MD5 ();
 				my $md5 = Digest::MD5::md5($data);
-				warn "Have md5=<$md5>";
 				$headers->{'sec-websocket-origin'}   ||= delete $headers->{'websocket-origin'}   || $self->{headers}{origin};
 				$headers->{'sec-websocket-location'} ||= delete $headers->{'websocket-location'} || do {
 					my $loc = URI->new_abs($self->{uri}, "http://$self->{headers}{host}");
@@ -55,6 +53,11 @@ sub upgrade {
 				# Dont use response method here to avoid cleanup
 				$self->{con}->response($self,101,'',msg => "Web Socket Protocol Handshake", headers => $headers);
 				$self->{con}{h}->push_write($md5);
+				my $ws = $self->{con}{srv}{websocket_class}->new(
+					con => $self->{con},
+				);
+				$self->dispose;
+				return $cb->($ws);
 				#$self->error(501, '', msg => "Not Implemented WebSockets Protocol v76+");
 				#return $cb->(undef, "Protocol version 76 not supported yet");
 			});
@@ -69,12 +72,12 @@ sub upgrade {
 			# Dont use response method here to avoid cleanup
 			$self->{con}->response($self,101,'',msg => "Web Socket Protocol Handshake", headers => $headers);
 			#warn "$self have\n\t con=$self->{con}\n\tsrv=$self->{con}{srv}\n\tws=$self->{con}{srv}{websocket_class}\n";
+			my $ws = $self->{con}{srv}{websocket_class}->new(
+				con => $self->{con},
+			);
+			$self->dispose;
+			return $cb->($ws);
 		}
-		my $ws = $self->{con}{srv}{websocket_class}->new(
-			con => $self->{con},
-		);
-		$self->dispose;
-		return $cb->($ws);
 	}
 	else {
 		return $cb->(undef, "Unsupported upgrade type: $type");

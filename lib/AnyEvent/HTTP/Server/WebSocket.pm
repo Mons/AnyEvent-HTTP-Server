@@ -12,8 +12,8 @@ our $UTF = Encode::find_encoding('utf-8') or die "No utf-8 encoding found";
 sub new {
 	my $pk = shift;
 	my $self = bless {@_},$pk;
-	$self->{con}{h}->on_eof(sub { warn "EOF WS"; } );
-	$self->{con}{h}->on_error(sub { warn "ERR WS @_"; } );
+	$self->{con}{h}->on_eof(sub { warn "EOF WS";$self->{close} and $self->{close}->(); } );
+	$self->{con}{h}->on_error(sub { warn "ERR WS @_";$self->{close} and $self->{close}->(); } );
 	$self;
 }
 
@@ -27,6 +27,15 @@ sub onmessage {
 		return;
 	}
 	$self->{recv};
+}
+
+sub onclose {
+	my $self = shift;
+	if (@_) {
+		$self->{close} = shift;
+		return;
+	}
+	$self->{close};
 }
 
 sub log:method {
@@ -66,7 +75,7 @@ sub reader {
 		my $byte = ord($first);
 		if ($first & 0x80 == 0x80) {
 			#$self->log("Need binary frame");
-			$h->unshift_read(regex => qr{^[\x80-\xff]+[\x00-\x7f]}, sub {
+			$h->unshift_read(regex => qr{^[\x80-\xff]*[\x00-\x7f]}, sub {
 				use integer;
 				shift;
 				my $length = 0;
@@ -75,12 +84,20 @@ sub reader {
 					my $byte = shift(@bytes) & 0x7f;
 					$length = $length * 128 + $byte;
 				}
-				$h->unshift_read(chunk => $length, sub {
-					shift;
-					$self->log("[ws.recv:binary] %d bytes", length $_[0]);
-					$self->{recv}($_[0]);
-					$self->reader;
-				});
+				if ($first == 0xff and $length == 0) {
+					warn "Received close handshake";
+					$h->push_write("\xff\x00");
+					$self->{close} and (delete $self->{close})->();
+					$self->{con}->close;
+				}
+				else {
+					$h->unshift_read(chunk => $length, sub {
+						shift;
+						$self->log("[ws.recv:binary] %d bytes", length $_[0]);
+						$self->{recv}($_[0]);
+						$self->reader;
+					});
+				}
 			});
 		}
 		else {
