@@ -205,8 +205,8 @@ sub handle_request {
 	$self->{srv}->handle_request(@_);
 }
 
-our @HEADER_ORDER = qw(upgrade connection websocket-origin websocket-location);
-our @HEADER_NAME  = qw(Upgrade Connection WebSocket-Origin WebSocket-Location);
+our @HEADER_ORDER = qw(upgrade connection websocket-origin websocket-location sec-websocket-origin sec-websocket-location);
+our @HEADER_NAME  = qw(Upgrade Connection WebSocket-Origin WebSocket-Location Sec-WebSocket-Origin Sec-Websocket-Location);
 our %HEADER_NAME;@HEADER_NAME{@HEADER_ORDER} = @HEADER_NAME;
 
 # response ("Text")
