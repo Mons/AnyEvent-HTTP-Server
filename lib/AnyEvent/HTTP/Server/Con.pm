@@ -202,7 +202,9 @@ sub read_headers {
 sub handle_request {
 	my $self = shift;
 	$self->{srv} or return $self->destroy;
-	$self->{srv}->handle_request(@_);
+	eval{
+		$self->{srv}->handle_request(@_);
+	1} or warn;
 }
 
 our @HEADER_ORDER = qw(upgrade connection websocket-origin websocket-location sec-websocket-origin sec-websocket-location);

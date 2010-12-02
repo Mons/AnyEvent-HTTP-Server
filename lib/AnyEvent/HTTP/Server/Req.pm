@@ -12,6 +12,8 @@ sub new {
 	$self;
 }
 
+sub uri { $_[0]{uri} }
+
 sub wants_websocket {
 	my $self = shift;
 	return lc $self->{headers}{connection} eq 'upgrade' && lc $self->{headers}{upgrade} eq 'websocket' ? 1 : 0;
@@ -91,6 +93,7 @@ sub response {
 	$self->{con}->response($self, @_);
 	$self->dispose;
 }
+*respond = \&response;
 
 sub error {
 	my $self = shift;
