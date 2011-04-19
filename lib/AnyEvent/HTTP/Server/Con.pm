@@ -5,6 +5,7 @@ use overload
 	fallback => 1;
 
 sub AUTOLOAD {}
+sub DESTROY {} # my $self = shift; warn "Really destroy $self->{id} $self->{host}:$self->{port}\n"; }
 
 package AnyEvent::HTTP::Server::Con;
 
@@ -51,6 +52,7 @@ sub new {
 		$self->{touch} = AE::now;
 		$self->ka_timer;
 	}
+	$self->{state} = 'idle';
 	$self->read_header();
 	return $self;
 }
@@ -74,10 +76,12 @@ sub ka_timer {
 sub read_header {
 	my $self = shift;
 	$self->{srv} or return $self->destroy;
+	$self->{state} = 'idle';
 	weaken (my $con = $self);
 	#warn "Begin reading from connection";
 	$con->{h}->push_read(chunk => 3 => sub {
 		$con or return;shift;
+		$self->{state} = 'headers';
 		my $pre = shift;
 		if ($pre =~ m{^<}) {
 			$con->{h}->unshift_read(regex => qr{.+?>} => sub {
@@ -202,7 +206,7 @@ sub read_headers {
 sub handle_request {
 	my $self = shift;
 	$self->{srv} or return $self->destroy;
-	eval{
+	local $@;eval{
 		$self->{srv}->handle_request(@_);
 	1} or warn;
 }
@@ -218,7 +222,14 @@ our %HEADER_NAME;@HEADER_NAME{@HEADER_ORDER} = @HEADER_NAME;
 sub response {
 	my ($con,$r,$code,$content, %args) = @_;
 	my $msg = $args{msg} || $HTTP::Easy::Status::MSG{$code} || "Code-$code";
-	my $hdr = $args{headers} || HTTP::Easy::Headers->new({});
+	my $hdr = exists $args{headers} ? do {
+		my %h;
+		while (my ($h, $v) = each %{ $args{headers} }) {
+			next unless defined $v;
+			$h{lc $h} = $v;
+		}
+		\%h;
+	} : HTTP::Easy::Headers->new({});
 	
 	# Resolve pipeline
 	if (@{$con->{r}} and $con->{r}[0] == $r) {
@@ -238,6 +249,10 @@ sub response {
 	#$hdr->{'expires'}        = $hdr->{'Date'}
 	#                         = _time_to_http_date time;
 	#$hdr->{'cache-control'}  = "max-age=0";
+	if (!ref $content and length $content ) {
+		#utf8::decode $content;
+		utf8::encode $content if utf8::is_utf8($content);
+	}
 	$hdr->{connection} ||= $con->{type};
 	if ($code >= 400 and !length $content ) {
 		$content = <<EOC;
@@ -268,10 +283,14 @@ EOC
 	}
 	while (my ($h, $v) = each %$hdr) {
 		next unless defined $v;
+		if (lc $h eq 'content-type' and $v !~ /charset/) {
+			$v .= '; charset=utf-8';
+		}
 		$res .= "\u$h: $v\015\012";
 	}
 
 	$res .= "\015\012";
+	warn "<$res>";
 	$con->{h}->push_write($res);
 	$con->log("%s - %s",$code,$r->{uri});
 	#warn "Respond to $con->{id}:\n$res";
@@ -323,11 +342,14 @@ EOC
 				$con->{h}->push_sendfile($content->{sendfile}, $content->{size});
 			}
 		} else {
-			$con->{h}->push_write($content) if length $content;
+			if (length $content) {
+				#utf8::decode $content;
+				#utf8::encode $content if utf8::is_utf8($content);
+				$con->{h}->push_write($content);
+			};
 		}
 	#}
 	if ($con->{close}) {
-		warn "Closing connection $con->{id}";
 		$con->close();
 	} else {
 		if ( @{$con->{r}} and $con->{r}[0]{ready}) {
@@ -360,10 +382,13 @@ sub destroy {
 
 sub DESTROY {
 	my $self = shift;
-	#warn "(".int($self).") Destroying AE::HTTP::Srv::Cnn";# if $self->{debug};
-	$self->{h}->destroy();
-	# TODO: cleanup callbacks
-	%$self = ();
+	#warn "closing connection $self->{id}. $self / $self->{srv}{con}{ $self->{id} }\n";
+	$self->{srv} and delete $self->{srv}{con}{ $self->{id} };
+	$self->{state} = 'idle';
+	my $x = $self->{close};
+	$self->{h} and $self->{h}->destroy();
+	%$self = ( state => 'closed', id => $self->{id}, host => $self->{host}, port => $self->{port} );
+	ref $x and $x->(),undef $x;
 	return;
 }
 

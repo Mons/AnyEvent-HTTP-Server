@@ -28,6 +28,8 @@ use AnyEvent::HTTP::Server::Con;
 use AnyEvent::HTTP::Server::Req;
 use AnyEvent::HTTP::Server::WebSocket;
 
+use Log::Any '$log';
+
 sub new {
 	my $pk = shift;
 	my $self = bless {
@@ -35,6 +37,7 @@ sub new {
 		connection_class => 'AnyEvent::HTTP::Server::Con',
 		request_class    => 'AnyEvent::HTTP::Server::Req',
 		websocket_class  => 'AnyEvent::HTTP::Server::WebSocket',
+		request_timeout  => 30,
 		@_,
 		con => {},
 	},$pk;
@@ -49,9 +52,13 @@ sub new {
 
 sub start {
 	my $self = shift;
+	my ($host,$port);
 	if ($self->{socket}) {
-		warn "Starting server on socket\n";
 		# <Derived from AnyEvent::Socket>
+		($port, $host) = AnyEvent::Socket::unpack_sockaddr getsockname $self->{socket};
+		$host = AnyEvent::Socket::format_address $host;
+		$log->debug("Starting server on socket $host:$port");
+		
 		$self->{aw} = AE::io $self->{socket}, 0, sub {
 			while ($self->{socket} && (my $peer = accept my $fh, $self->{socket})) {
 				binmode($fh,':raw');
@@ -63,18 +70,19 @@ sub start {
 		};
 		# </Derived from AnyEvent::Socket>
 	} else {
-		warn "Starting server on port $self->{port}\n";
-		tcp_server $self->{host}, $self->{port}, sub {
+		$log->debug("Starting server on $self->{host}:$self->{port}");
+		$self->{aw} = tcp_server $self->{host}, $self->{port}, sub {
 			my $fh = shift or return warn "couldn't accept client: $!";
 			my ($host, $port) = @_;
 			$self->accept($fh,$host, $port);
 		}, sub {
+			(undef,$host,$port) = @_;
 			#my $fh = shift or return warn "couldn't accept client: $!";
 			#setsockopt($fh, SOL_SOCKET, SO_REUSEADDR, 1) or die "Can't set socket option: $!";
 			1024;
 		};
 	}
-	warn "Ready";
+	$log->debug("Started server on $host:$port");
 }
 
 sub accept :method {
@@ -86,7 +94,7 @@ sub accept :method {
 		port     => $port,
 		on_error => sub {
 			my $con = shift;
-			warn "@_";
+			$log->warn("@_");
 			delete $self->{con}{$con->{id}};
 		},
 	);
@@ -94,16 +102,49 @@ sub accept :method {
 	return;
 }
 
+sub stop {
+	my ($self,$cb) = @_;
+	delete $self->{aw};
+	close $self->{socket};
+	if (%{$self->{con}}) {
+		$log->debugf("Server have %d active connectinos while stopping...", 0+keys %{$self->{con}});
+		my $cv = &AE::cv( $cb );
+		$cv->begin;
+		for my $key ( keys %{$self->{con}} ) {
+			my $con = $self->{con}{$key};
+			$log->debug("$key: connection from $con->{host}:$con->{port}: $con->{state}");
+			if ($con->{state} eq 'idle' or $con->{state} eq 'closed') {
+				$con->close;
+				delete $self->{con}{$key};
+				use Devel::FindRef;
+				warn "closed <$con> ".Devel::FindRef::track $con;
+			} else {
+				$cv->begin;
+				$con->{close} = sub {
+					$log->debug("Connection $con->{host}:$con->{port} was closed");
+					$cv->end;
+				};
+			}
+		}
+		if (%{$self->{con}}) {
+			$log->debug("Still have @{[ 0+keys %{$self->{con}} ]}");
+		}
+		$cv->end;
+	} else {
+		$cb->();
+	}
+}
+
 sub handle_request {
 	my ($self,$r,$data) = @_;
-	#warn "Handle request";
-	weaken(my $x = $r);
-	$r->{t} = AE::timer 5,0,sub {
-		$x or return;
-		warn "Fire timeout timer";
-		$x->response(504, msg => "Gateway timeout");
-	};
 	$self->{request} or return;
+	weaken(my $x = $r);
+	my $timeout = $self->{request_timeout} || 30;
+	$r->{t} = AE::timer $timeout, 0, sub {
+		$x or return;
+		$log->warn("Request handle timed out after $timeout seconds");
+		$x->error(504);
+	};
 	if (UNIVERSAL::can($self->{request},'handle')) {
 		$self->{request}->handle($r,$data);
 	} else {
