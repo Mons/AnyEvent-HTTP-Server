@@ -10,8 +10,11 @@ sub new {
 
 sub handle {
 	my ($self,$r,$data) = @_;
-	for (@{$self->{chain}}) {
-		my $rs = UNIVERSAL::can($_,'handle') ? $_->handle($r,$data) : $_->($r,$data);
+	for my $c (@{$self->{chain}}) {
+		my $rs =
+			UNIVERSAL::can($c,'handle') ? $c->handle($r,$data) :
+			UNIVERSAL::isa($c,'CODE') ? $c->($r,$data) :
+			warn( "'$c' can't be used as a handler." ),next;
 		if ($rs) {
 			return 1;
 		} else {

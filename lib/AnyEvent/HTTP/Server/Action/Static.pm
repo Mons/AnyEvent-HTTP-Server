@@ -25,7 +25,7 @@ sub new {
 				#warn "Defined type $type for $path, size=". -s _;
 				$headers->{'content-type'} = $type;
 				$headers->{'content-length'} = -s _;
-				$headers->{'cache-control'} => 'no-cache, must-revalidate, max-age=0';
+				#$headers->{'cache-control'} = 'no-cache, must-revalidate, max-age=0';
 				if ($r->{method} eq 'HEAD') {
 					$r->response(200, '', headers => $headers );
 				} else {

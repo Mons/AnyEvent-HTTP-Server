@@ -103,6 +103,18 @@ sub error {
 	$self->dispose;
 }
 
+sub go {
+	warn "go @_";
+	my $self = shift;
+	my $location = shift;
+	my $code = @_ % 2 ? shift : 302;
+	my %args = @_;
+	my $headers = delete $args{headers} || {};
+	$headers->{location} = $location;
+	$code ||= 302;
+	$self->response($code, '', %args, headers => $headers);
+}
+
 sub dispose {
 	my $self = shift;
 	return %$self = ();
