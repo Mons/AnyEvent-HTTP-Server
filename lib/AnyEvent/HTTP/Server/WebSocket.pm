@@ -3,7 +3,6 @@ package AnyEvent::HTTP::Server::WebSocket;
 use common::sense;
 use URI;
 use Encode;
-use Devel::Hexdump 'xd';
 
 no utf8;
 use bytes;
@@ -16,6 +15,7 @@ our $JSON = JSON::XS->new->utf8;#->pretty;
 our $UTF = Encode::find_encoding('utf-8') or die "No utf-8 encoding found";
 
 use constant GUID => '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+use constant DEBUG => 0;
 use constant {
   CONTINUATION => 0,
   TEXT         => 1,
@@ -24,6 +24,14 @@ use constant {
   PING         => 9,
   PONG         => 10
 };
+BEGIN {
+	if (DEBUG) {
+		require Devel::Hexdump;
+		Devel::Hexdump->import( 'xd' );
+	} else {
+		*xd = sub {};
+	}
+}
 
 our %OP = (
 	CONTINUATION() => 'CONT',
