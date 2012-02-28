@@ -33,7 +33,7 @@ sub new {
 				}
 				return 1;
 			} else {
-				warn "File `$path' not found";
+				$@ = "File `$path' not found";
 				return 0;
 			}
 		}

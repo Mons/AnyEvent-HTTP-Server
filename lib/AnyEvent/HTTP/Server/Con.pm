@@ -16,6 +16,36 @@ use Scalar::Util qw(weaken);
 use HTTP::Easy::Headers;
 use HTTP::Easy::Status;
 
+sub access_log {
+	my $self = shift;
+	$self->{access_log} and return $self->{access_log}($self,@_);
+	my %args = @_;
+	if (-t STDERR) {
+		print STDERR "\e[".do {
+			my $c = int($args{code} / 100);
+			$args{ws} ? "36" :
+			$c == 1 ? "1;36" :
+			$c == 2 ? "1;32" :
+			$c == 3 ? "1;34" :
+			$c == 4 ? "1;33" :
+			$c == 5 ? "1;31" :
+			"1;35"
+		}."m";
+	}
+	printf STDERR
+		"%08x(%d) %s:%d - ", $self->{id},$self->{fileno}, $self->{host},$self->{port};
+	if ($args{ws}) {
+		printf STDERR "%s", $args{m};
+	} else {
+		printf STDERR "[%s] - %s".(exists $args{m} ? " (%s)" : ""), $args{code}, $args{uri}, $args{m};
+	}
+		
+	if (-t STDERR) {
+		print STDERR "\e[0m";
+	}
+	print STDERR "\n";
+}
+
 sub log:method {
 	my $self = shift;
 	my $fmt = shift;
@@ -43,6 +73,7 @@ sub new {
 	weaken($self->{srv} = $srv);
 	$self->{id} = int $self;
 	$self->{fh} = $fh;
+	$self->{fileno} = fileno $fh;
 	$self->{h}  = $h;
 	$self->{r}  = [],
 	$self->{host} = $args{host};
@@ -64,7 +95,7 @@ sub ka_timer {
 	weaken (my $this = $self);
 	$self->{ka} = AE::timer $this->{ka_timeout} + 1, 0, sub {
 		$this or return;
-		warn "closing by timeout keep-alive connection from $this->{host}:$this->{port}\n";
+		warn "closing ".fileno($this->{h}{fh})." by timeout keep-alive connection from $this->{host}:$this->{port}\n";
 		if (AE::now - $this->{touch} >= $this->{ka_timeout}) {
 			$this->close;
 		} else {
@@ -78,7 +109,7 @@ sub read_header {
 	$self->{srv} or return $self->destroy;
 	$self->{state} = 'idle';
 	weaken (my $con = $self);
-	#warn "Begin reading from connection";
+	#warn "Begin reading from connection ";
 	$con->{h}->push_read(chunk => 3 => sub {
 		$con or return;shift;
 		$self->{state} = 'headers';
@@ -127,6 +158,7 @@ sub read_header {
 				$con->destroy();
 			});
 		} else {
+			#warn "reading line from handle";
 			$con->{h}->unshift_read(line => sub {
 				$con or return;shift;
 				my $line = $pre.shift;
@@ -158,6 +190,7 @@ sub read_headers {
 		sub {
 			$con or return;
 			my ($h, $data) = @_;
+			#warn "<<\n$data\n";
 			my $hdr = HTTP::Easy::Headers->decode($data);
 			unless (defined $hdr) {
 				$con->fatal_error(400);
@@ -211,8 +244,8 @@ sub handle_request {
 	1} or warn;
 }
 
-our @HEADER_ORDER = qw(upgrade connection websocket-origin websocket-location sec-websocket-origin sec-websocket-location);
-our @HEADER_NAME  = qw(Upgrade Connection WebSocket-Origin WebSocket-Location Sec-WebSocket-Origin Sec-Websocket-Location);
+our @HEADER_ORDER = qw(upgrade connection websocket-origin websocket-location sec-websocket-origin sec-websocket-location sec-websocket-key sec-websocket-accept sec-websocket-protocol);
+our @HEADER_NAME  = qw(Upgrade Connection WebSocket-Origin WebSocket-Location Sec-WebSocket-Origin Sec-Websocket-Location Sec-WebSocket-Key Sec-WebSocket-Accept Sec-WebSocket-Protocol);
 our %HEADER_NAME;@HEADER_NAME{@HEADER_ORDER} = @HEADER_NAME;
 
 # response ("Text")
@@ -290,9 +323,10 @@ EOC
 	}
 
 	$res .= "\015\012";
-	warn "<$res>";
+	#warn "<$res>";
 	$con->{h}->push_write($res);
-	$con->log("%s - %s",$code,$r->{uri});
+	$con->access_log( code => $code, uri => $r->{uri} );
+	#$con->log("%s - %s",$code,$r->{uri});
 	#warn "Respond to $con->{id}:\n$res";
 
 =for rem
