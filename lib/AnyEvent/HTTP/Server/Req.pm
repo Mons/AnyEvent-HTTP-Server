@@ -18,7 +18,7 @@ sub uri { $_[0]{uri} }
 
 sub wants_websocket {
 	my $self = shift;
-	return lc $self->{headers}{connection} eq 'upgrade' && lc $self->{headers}{upgrade} eq 'websocket' ? 1 : 0;
+	return lc $self->{headers}{connection} =~ /upgrade/ && lc $self->{headers}{upgrade} eq 'websocket' ? 1 : 0;
 }
 
 sub upgrade {
