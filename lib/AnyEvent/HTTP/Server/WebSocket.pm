@@ -94,7 +94,7 @@ sub new {
 	
 	$self->{h}->on_eof(sub {
 		$this or return;
-		$this->destroy("EOF");
+		$this->finish();
 	} );
 	$self->{h}->on_error(sub {
 		$this or return;
