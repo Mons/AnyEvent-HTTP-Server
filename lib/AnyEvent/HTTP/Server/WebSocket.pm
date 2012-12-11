@@ -291,8 +291,10 @@ sub log:method {
 sub finish {
 	my $self = shift;
 	$self->send_frame(1, 0, 0, 0, CLOSE, '');
+	$self->{close} and $self->{close}();
 	$self->{h} and $self->{h}->destroy;
 	%$self = ();
+	return 1;
 }
 
 sub build_frame {
