@@ -94,7 +94,7 @@ sub new {
 	
 	$self->{h}->on_eof(sub {
 		$this or return;
-		$this->destroy("EOF");
+		$this->finish();
 	} );
 	$self->{h}->on_error(sub {
 		$this or return;
@@ -291,8 +291,10 @@ sub log:method {
 sub finish {
 	my $self = shift;
 	$self->send_frame(1, 0, 0, 0, CLOSE, '');
+	$self->{close} and $self->{close}();
 	$self->{h} and $self->{h}->destroy;
 	%$self = ();
+	return 1;
 }
 
 sub build_frame {
